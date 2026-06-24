@@ -17,7 +17,6 @@ import requests
 
 DEFAULT_CONTEXT_WORDS = 56_000
 DEFAULT_TOOL_COUNT = 8
-DEFAULT_MAX_TOKENS = 8
 DEFAULT_CONNECT_TIMEOUT_SECONDS = 5
 DEFAULT_READ_TIMEOUT_SECONDS: float | None = None
 
@@ -93,7 +92,7 @@ class RawClient:
         body_bytes = json.dumps(
             body,
             ensure_ascii=False,
-            separators=(",", ":"),
+            indent=2,
         ).encode("utf-8")
         sent_headers = {
             "Content-Type": "application/json",
@@ -370,7 +369,6 @@ def build_body(
     conversation: list[tuple[str, str]],
     tools: list[dict[str, Any]],
     stream: bool,
-    max_tokens: int,
     temperature: float,
 ) -> dict[str, Any]:
     if api == "chat":
@@ -379,13 +377,7 @@ def build_body(
             "messages": [{"role": "system", "content": system_prompt}]
             + [{"role": role, "content": content} for role, content in conversation],
             "temperature": temperature,
-            "max_tokens": max_tokens,
             "stream": stream,
-            # LM Studio/llama.cpp-style reasoning models otherwise may spend the
-            # whole tiny completion budget on hidden reasoning and return an
-            # empty content field. Local servers that do not use it usually
-            # ignore this field.
-            "reasoning_effort": "none",
         }
         if stream:
             body["stream_options"] = {"include_usage": True}
@@ -399,6 +391,7 @@ def build_body(
             item_type = "output_text" if role == "assistant" else "input_text"
             input_items.append(
                 {
+                    "type": "message",
                     "role": role,
                     "content": [{"type": item_type, "text": content}],
                 }
@@ -408,12 +401,7 @@ def build_body(
             "instructions": system_prompt,
             "input": input_items,
             "temperature": temperature,
-            "max_output_tokens": max_tokens,
             "stream": stream,
-            # LM Studio supports this OpenAI Responses-style reasoning control.
-            # It keeps smoke/cache probes focused on prompt processing instead
-            # of spending the tiny output budget on reasoning text.
-            "reasoning": {"effort": "none"},
         }
         if stream:
             body["stream_options"] = {"include_usage": True}
@@ -427,7 +415,7 @@ def build_body(
             "system": system_prompt,
             "messages": [{"role": role, "content": content} for role, content in conversation],
             "temperature": temperature,
-            "max_tokens": max_tokens,
+            "max_tokens": 4096,
             "stream": stream,
         }
         if tools:
@@ -442,7 +430,6 @@ def build_warmup_body(
     api: str,
     model: str,
     stream: bool,
-    max_tokens: int,
     temperature: float,
 ) -> dict[str, Any]:
     return build_body(
@@ -452,7 +439,6 @@ def build_warmup_body(
         conversation=[("user", "Reply exactly OK.")],
         tools=[],
         stream=stream,
-        max_tokens=max_tokens,
         temperature=temperature,
     )
 
@@ -482,7 +468,17 @@ def render_http_response(
     for key, value in headers.items():
         lines.append(f"{key}: {value}")
     lines.append("")
-    return ("\n".join(lines) + "\n").encode("utf-8") + body
+    return ("\n".join(lines) + "\n").encode("utf-8") + pretty_json_bytes(body)
+
+
+def pretty_json_bytes(body: bytes) -> bytes:
+    if not body.strip():
+        return body
+    try:
+        parsed = json.loads(body.decode("utf-8"))
+    except Exception:
+        return body
+    return json.dumps(parsed, indent=2, ensure_ascii=False).encode("utf-8")
 
 
 def redact_headers(headers: dict[str, str], log_secrets: bool) -> dict[str, str]:
@@ -563,25 +559,26 @@ def extract_stream_delta(api: str, obj: Any, event_name: str | None) -> str:
                 content = delta.get("content")
                 if isinstance(content, str) and content:
                     return content
-                # Some local reasoning models expose only reasoning deltas when
-                # max_tokens is tiny. Show that instead of an empty output.
-                reasoning = delta.get("reasoning_content") or delta.get("reasoning")
-                if isinstance(reasoning, str):
-                    return reasoning
         return ""
 
     if api == "responses":
         delta = obj.get("delta")
-        if isinstance(delta, str):
-            return delta
-        if event_name == "response.output_text.delta" and isinstance(delta, str):
+        event_type = obj.get("type")
+        if (
+            event_name == "response.output_text.delta"
+            or event_type == "response.output_text.delta"
+        ) and isinstance(delta, str):
             return delta
         return ""
 
     if api == "anthropic":
         if obj.get("type") == "content_block_delta":
             delta_obj = obj.get("delta")
-            if isinstance(delta_obj, dict) and isinstance(delta_obj.get("text"), str):
+            if (
+                isinstance(delta_obj, dict)
+                and delta_obj.get("type") == "text_delta"
+                and isinstance(delta_obj.get("text"), str)
+            ):
                 return delta_obj["text"]
         return ""
 
@@ -600,12 +597,6 @@ def extract_text(api: str, obj: Any) -> str:
                 content = message.get("content")
                 if isinstance(content, str) and content:
                     return content
-                # LM Studio/llama.cpp-style reasoning models may return an
-                # empty content field plus reasoning_content. Surface that in
-                # the UI so smoke tests do not look blank.
-                reasoning = message.get("reasoning_content") or message.get("reasoning")
-                if isinstance(reasoning, str):
-                    return reasoning
         return ""
 
     if api == "responses":
@@ -615,12 +606,16 @@ def extract_text(api: str, obj: Any) -> str:
         output = obj.get("output")
         if isinstance(output, list):
             for item in output:
-                if not isinstance(item, dict):
+                if not isinstance(item, dict) or item.get("type") != "message":
                     continue
                 content = item.get("content")
                 if isinstance(content, list):
                     for c in content:
-                        if isinstance(c, dict) and isinstance(c.get("text"), str):
+                        if (
+                            isinstance(c, dict)
+                            and c.get("type") == "output_text"
+                            and isinstance(c.get("text"), str)
+                        ):
                             parts.append(c["text"])
         return "".join(parts)
 
@@ -755,7 +750,6 @@ def run_session(
     stream: bool,
     turns: int,
     tool_count: int,
-    max_tokens: int,
     temperature: float,
 ) -> list[RequestResult]:
     endpoint = endpoint_for(api, base_url)
@@ -783,7 +777,6 @@ def run_session(
             conversation=conversation,
             tools=tools,
             stream=stream,
-            max_tokens=max_tokens,
             temperature=temperature,
         )
         label = f"{mode}-turn{turn}"
@@ -822,7 +815,6 @@ def run_warmup(
             api=api,
             model=model,
             stream=False,
-            max_tokens=DEFAULT_MAX_TOKENS,
             temperature=temperature,
         ),
         stream=False,
@@ -1030,12 +1022,6 @@ def parse_args(argv: Iterable[str]) -> argparse.Namespace:
         help="Whether to test streaming, non-streaming, or both (default: both).",
     )
     parser.add_argument(
-        "--max-tokens",
-        type=int,
-        default=DEFAULT_MAX_TOKENS,
-        help=f"Maximum output tokens per request (default: {DEFAULT_MAX_TOKENS}).",
-    )
-    parser.add_argument(
         "--temperature",
         type=float,
         default=0.0,
@@ -1102,7 +1088,6 @@ def main(argv: list[str] | None = None) -> int:
         "tool_count": args.tool_count,
         "turns": turns,
         "streaming": args.streaming,
-        "max_tokens": args.max_tokens,
         "temperature": args.temperature,
         "seed": args.seed,
     }
@@ -1157,7 +1142,6 @@ def main(argv: list[str] | None = None) -> int:
             stream=stream,
             turns=turns,
             tool_count=args.tool_count,
-            max_tokens=args.max_tokens,
             temperature=args.temperature,
         )
         results.extend(session_results)

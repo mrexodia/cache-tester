@@ -21,7 +21,6 @@ import requests
 from cache_tester.core import (
     DEFAULT_CONNECT_TIMEOUT_SECONDS,
     DEFAULT_CONTEXT_WORDS,
-    DEFAULT_MAX_TOKENS,
     DEFAULT_TOOL_COUNT,
     RawClient,
     RequestResult,
@@ -202,10 +201,6 @@ HTML = r"""
         <input id="turns" type="number" min="2" max="8" value="2" />
       </div>
       <div class="field col-2">
-        <label for="maxTokens">Max output</label>
-        <input id="maxTokens" type="number" min="1" max="128" value="8" />
-      </div>
-      <div class="field col-2">
         <label for="readTimeout">Read timeout sec</label>
         <input id="readTimeout" type="number" min="1" step="1" placeholder="none" />
       </div>
@@ -226,7 +221,7 @@ HTML = r"""
     <div class="card"><div class="muted small">Run id</div><div class="value mono" id="runIdCard">-</div></div>
     <div class="card"><div class="muted small">Smoke</div><div class="value" id="smokeCard">0 / 6</div></div>
     <div class="card"><div class="muted small">Full cache tests</div><div class="value" id="fullCard">0</div></div>
-    <div class="card"><div class="muted small">Raw logs</div><div class="value small" id="logCard">click rows</div></div>
+    <div class="card"><div class="muted small">Tests passed</div><div class="value small" id="logCard">0 / 0</div></div>
   </section>
 
   <section class="panel">
@@ -290,18 +285,17 @@ function cfg() {
     context_tokens: parseInt(el('contextTokens').value || '56000', 10),
     tool_count: parseInt(el('toolCount').value || '8', 10),
     turns: parseInt(el('turns').value || '2', 10),
-    max_tokens: parseInt(el('maxTokens').value || '8', 10),
     temperature: 0,
     read_timeout: readTimeoutRaw ? parseFloat(readTimeoutRaw) : null
   };
 }
 function saveCfg() {
-  for (const id of ['endpoint','apiKey','model','contextTokens','toolCount','turns','maxTokens','readTimeout']) {
+  for (const id of ['endpoint','apiKey','model','contextTokens','toolCount','turns','readTimeout']) {
     localStorage.setItem('cacheTester.' + id, el(id).value);
   }
 }
 function loadCfg() {
-  for (const id of ['endpoint','apiKey','model','contextTokens','toolCount','turns','maxTokens','readTimeout']) {
+  for (const id of ['endpoint','apiKey','model','contextTokens','toolCount','turns','readTimeout']) {
     const v = localStorage.getItem('cacheTester.' + id);
     if (v !== null) el(id).value = v;
   }
@@ -336,7 +330,7 @@ async function discoverModels(silent=false) {
   const r = await fetch('/api/models?' + q.toString());
   const data = await r.json();
   if (data.ok && data.models && data.models.length) {
-    if (!el('model').value.trim()) el('model').value = data.models[0];
+    el('model').value = data.models[0];
     setStatus(`Discovered ${data.models.length} model(s). Selected ${el('model').value}.`, 'ok');
     saveCfg();
     return true;
@@ -366,9 +360,7 @@ function resultFiles(result) {
   if (!result) return {};
   return {
     'request.http': result.request_http_path,
-    'request.json': result.request_json_path,
     'response.http': result.response_http_path,
-    'response.json/events': result.response_json_path,
   };
 }
 async function toggleLog(id, result) {
@@ -409,7 +401,7 @@ function renderLogRow(colspan, id) {
   if (!data.ok) {
     return `<tr class="log-row"><td colspan="${colspan}"><div class="bad">${escapeHtml(data.error || 'Failed to load logs')}</div></td></tr>`;
   }
-  const order = ['request.http', 'response.http', 'request.json', 'response.json/events'];
+  const order = ['request.http', 'response.http'];
   const blocks = order.filter(name => data.files && data.files[name] != null).map(name => {
     return `<div class="log-block"><div class="log-title">${escapeHtml(name)}</div><pre>${escapeHtml(data.files[name])}</pre></div>`;
   }).join('');
@@ -495,11 +487,13 @@ function renderFullTable() {
 }
 function renderCards() {
   el('runIdCard').textContent = runId.replace(/^web-/, '').slice(0, 19);
-  const smokeDone = [...smokeResults.values()].filter(v => v && v !== 'running' && v.ok).length;
-  el('smokeCard').textContent = `${smokeDone} / ${COMBOS.length}`;
-  const fullDone = [...fullResults.values()].filter(v => v && v !== 'running').length;
-  el('fullCard').textContent = String(fullDone);
-  el('logCard').textContent = 'click rows';
+  const smokePassed = [...smokeResults.values()].filter(v => v && v !== 'running' && v.ok).length;
+  const smokeCompleted = [...smokeResults.values()].filter(v => v && v !== 'running').length;
+  el('smokeCard').textContent = `${smokePassed} / ${COMBOS.length}`;
+  const fullCompleted = [...fullResults.values()].filter(v => v && v !== 'running').length;
+  const fullPassed = [...fullResults.values()].filter(v => v && v !== 'running' && v.ok).length;
+  el('fullCard').textContent = String(fullCompleted);
+  el('logCard').textContent = `${smokePassed + fullPassed} / ${smokeCompleted + fullCompleted}`;
 }
 function renderAll() { renderWarmupTable(); renderSmokeTable(); renderFullTable(); renderCards(); }
 async function runSmoke(reset=true) {
@@ -579,12 +573,11 @@ el('discoverBtn').onclick = () => discoverModels(false);
 el('smokeBtn').onclick = () => runSmoke(true);
 el('fullBtn').onclick = () => runFull();
 el('allBtn').onclick = () => runAll();
-for (const id of ['endpoint','apiKey','model','contextTokens','toolCount','turns','maxTokens','readTimeout']) {
+for (const id of ['endpoint','apiKey','model','contextTokens','toolCount','turns','readTimeout']) {
   el(id).addEventListener('change', saveCfg);
 }
 loadCfg();
 renderAll();
-discoverModels(true).catch(() => {});
 </script>
 </body>
 </html>
@@ -648,7 +641,6 @@ def config_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "context_tokens": max(100, int(payload.get("context_tokens") or DEFAULT_CONTEXT_WORDS)),
         "tool_count": max(0, int(payload.get("tool_count") or DEFAULT_TOOL_COUNT)),
         "turns": max(2, int(payload.get("turns") or 2)),
-        "max_tokens": max(1, int(payload.get("max_tokens") or DEFAULT_MAX_TOKENS)),
         "temperature": float(payload.get("temperature") or 0.0),
         "connect_timeout": float(payload.get("connect_timeout") or DEFAULT_CONNECT_TIMEOUT_SECONDS),
         "read_timeout": read_timeout,
@@ -755,7 +747,6 @@ def run_hidden_warmup(root: Path, payload: dict[str, Any]) -> dict[str, Any]:
             conversation=[("user", "Reply exactly OK.")],
             tools=[],
             stream=False,
-            max_tokens=max(2, min(cfg["max_tokens"], 8)),
             temperature=cfg["temperature"],
         )
         result = client.post_json(
@@ -802,7 +793,6 @@ def run_smoke_one(root: Path, payload: dict[str, Any]) -> dict[str, Any]:
         conversation=[("user", "ping. Reply exactly pong.")],
         tools=make_smoke_tools(cfg["api"], smoke_nonce),
         stream=cfg["stream"],
-        max_tokens=cfg["max_tokens"],
         temperature=cfg["temperature"],
     )
     result = client.post_json(
@@ -842,7 +832,6 @@ def run_full_one(root: Path, payload: dict[str, Any]) -> dict[str, Any]:
         stream=cfg["stream"],
         turns=cfg["turns"],
         tool_count=cfg["tool_count"],
-        max_tokens=cfg["max_tokens"],
         temperature=cfg["temperature"],
     )
     assessment = assess_mode(results)
@@ -930,8 +919,8 @@ class CacheTesterHandler(BaseHTTPRequestHandler):
         raw = json.dumps(data, ensure_ascii=False).encode("utf-8")
         self.send_bytes(raw, "application/json; charset=utf-8", status)
 
-    def log_message(self, fmt: str, *args: Any) -> None:
-        print(f"[{self.log_date_time_string()}] {fmt % args}", file=sys.stderr)
+    def log_message(self, format: str, *args: Any) -> None:
+        print(f"[{self.log_date_time_string()}] {format % args}", file=sys.stderr)
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
