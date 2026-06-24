@@ -16,8 +16,7 @@ http://127.0.0.1:8765
 
 The UI defaults to:
 
-- endpoint: `http://127.0.0.1:1234`
-- API key: `sk-local`
+- endpoint: `http://127.0.0.1:1234` (LM Studio)
 - model: auto-discovered from `/v1/models`
 - context size: ~56k common-word tokens
 - tools: 8 synthetic tool definitions

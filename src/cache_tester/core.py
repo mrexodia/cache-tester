@@ -674,19 +674,18 @@ def apply_usage_and_timing(result: RequestResult, obj: Any) -> None:
         return
     usage = obj.get("usage") if isinstance(obj.get("usage"), dict) else {}
 
-    result.input_tokens = first_int(
+    raw_input_tokens = first_int(
         usage,
         "prompt_tokens",
         "input_tokens",
         "input_token_count",
     )
-    result.output_tokens = first_int(
+    output_tokens = first_int(
         usage,
         "completion_tokens",
         "output_tokens",
         "output_token_count",
     )
-    result.total_tokens = first_int(usage, "total_tokens")
 
     prompt_details = usage.get("prompt_tokens_details")
     input_details = usage.get("input_tokens_details")
@@ -697,13 +696,23 @@ def apply_usage_and_timing(result: RequestResult, obj: Any) -> None:
         cached = first_int(input_details, "cached_tokens")
     if cached is None:
         cached = first_int(usage, "cache_read_input_tokens", "cached_tokens")
-    result.cached_tokens = cached
-    result.cache_write_tokens = first_int(
+    cache_write = first_int(
         usage,
         "cache_creation_input_tokens",
         "cache_write_input_tokens",
         "cache_written_tokens",
     )
+
+    if result.api == "anthropic" and raw_input_tokens is not None:
+        result.input_tokens = raw_input_tokens + (cached or 0) + (cache_write or 0)
+    else:
+        result.input_tokens = raw_input_tokens
+    result.output_tokens = output_tokens
+    result.total_tokens = first_int(usage, "total_tokens")
+    if result.total_tokens is None and result.input_tokens is not None and output_tokens is not None:
+        result.total_tokens = result.input_tokens + output_tokens
+    result.cached_tokens = cached
+    result.cache_write_tokens = cache_write
 
     timings = obj.get("timings") if isinstance(obj.get("timings"), dict) else {}
     prompt_ms = first_float(timings, "prompt_ms", "prompt_eval_ms")
@@ -993,7 +1002,7 @@ def parse_args(argv: Iterable[str]) -> argparse.Namespace:
     parser.add_argument(
         "--api-key",
         default=None,
-        help="API key. Defaults to OPENAI_API_KEY, ANTHROPIC_API_KEY, then sk-local.",
+        help="API key. Defaults to OPENAI_API_KEY, ANTHROPIC_API_KEY",
     )
     parser.add_argument(
         "--context-tokens",
@@ -1067,7 +1076,7 @@ def parse_args(argv: Iterable[str]) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
     base_url = normalize_base_url(args.base_url)
-    api_key = args.api_key or os.getenv("OPENAI_API_KEY") or os.getenv("ANTHROPIC_API_KEY") or "sk-local"
+    api_key = args.api_key or os.getenv("OPENAI_API_KEY") or os.getenv("ANTHROPIC_API_KEY") or ""
     model = args.model or discover_model(base_url, api_key, args.connect_timeout) or "local-model"
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     log_dir = args.log_dir / timestamp

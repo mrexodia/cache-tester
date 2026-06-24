@@ -11,6 +11,10 @@ dependencies = [
 [project.scripts]
 cache-tester = "cache_tester.web:main"
 
+[tool.hatch.build.targets.wheel]
+packages = ["src/cache_tester"]
+include = ["/src/cache_tester/www"]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
