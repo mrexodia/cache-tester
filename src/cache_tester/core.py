@@ -104,7 +104,9 @@ class RawClient:
         request_http_path = self.log_dir / f"{prefix}.request.http"
         request_json_path.write_bytes(body_bytes)
         request_http_path.write_text(
-            render_http_request("POST", url, sent_headers, body_bytes, self.log_secrets),
+            render_http_request(
+                "POST", url, sent_headers, body_bytes, self.log_secrets
+            ),
             encoding="utf-8",
         )
 
@@ -413,7 +415,9 @@ def build_body(
         body = {
             "model": model,
             "system": system_prompt,
-            "messages": [{"role": role, "content": content} for role, content in conversation],
+            "messages": [
+                {"role": role, "content": content} for role, content in conversation
+            ],
             "temperature": temperature,
             "max_tokens": 4096,
             "stream": stream,
@@ -592,7 +596,9 @@ def extract_text(api: str, obj: Any) -> str:
     if api == "chat":
         choices = obj.get("choices")
         if isinstance(choices, list) and choices:
-            message = choices[0].get("message") if isinstance(choices[0], dict) else None
+            message = (
+                choices[0].get("message") if isinstance(choices[0], dict) else None
+            )
             if isinstance(message, dict):
                 content = message.get("content")
                 if isinstance(content, str) and content:
@@ -646,12 +652,16 @@ def coalesce_stream_metrics(api: str, events: list[Any]) -> Any:
             continue
         if api == "responses" and isinstance(data.get("response"), dict):
             response_obj = data["response"]
-            if response_obj.get("status") == "completed" or isinstance(response_obj.get("usage"), dict):
+            if response_obj.get("status") == "completed" or isinstance(
+                response_obj.get("usage"), dict
+            ):
                 final_response = response_obj
             elif final_response is None:
                 final_response = response_obj
         nested_message = data.get("message")
-        if isinstance(nested_message, dict) and isinstance(nested_message.get("usage"), dict):
+        if isinstance(nested_message, dict) and isinstance(
+            nested_message.get("usage"), dict
+        ):
             usage_obj.update(nested_message["usage"])
         if isinstance(data.get("usage"), dict):
             usage_obj.update(data["usage"])
@@ -709,7 +719,11 @@ def apply_usage_and_timing(result: RequestResult, obj: Any) -> None:
         result.input_tokens = raw_input_tokens
     result.output_tokens = output_tokens
     result.total_tokens = first_int(usage, "total_tokens")
-    if result.total_tokens is None and result.input_tokens is not None and output_tokens is not None:
+    if (
+        result.total_tokens is None
+        and result.input_tokens is not None
+        and output_tokens is not None
+    ):
         result.total_tokens = result.input_tokens + output_tokens
     result.cached_tokens = cached
     result.cache_write_tokens = cache_write
@@ -891,17 +905,27 @@ def print_report(results: list[RequestResult], log_dir: Path) -> None:
     print_table(headers, rows)
     print()
     for stream in (False, True):
-        mode_results = [r for r in results if r.label.startswith("stream" if stream else "nonstream")]
+        mode_results = [
+            r
+            for r in results
+            if r.label.startswith("stream" if stream else "nonstream")
+        ]
         if mode_results:
-            print(f"{('streaming' if stream else 'non-streaming')}: {assess_mode(mode_results)}")
+            print(
+                f"{('streaming' if stream else 'non-streaming')}: {assess_mode(mode_results)}"
+            )
 
 
-def write_summary(results: list[RequestResult], log_dir: Path, config: dict[str, Any]) -> None:
+def write_summary(
+    results: list[RequestResult], log_dir: Path, config: dict[str, Any]
+) -> None:
     summary = {
         "config": config,
         "results": [asdict(r) for r in results],
         "assessments": {
-            "nonstream": assess_mode([r for r in results if r.label.startswith("nonstream")]),
+            "nonstream": assess_mode(
+                [r for r in results if r.label.startswith("nonstream")]
+            ),
             "stream": assess_mode([r for r in results if r.label.startswith("stream")]),
         },
     }
@@ -910,7 +934,17 @@ def write_summary(results: list[RequestResult], log_dir: Path, config: dict[str,
         encoding="utf-8",
     )
     lines = ["# Cache tester report", "", f"Logs: `{log_dir}`", "", "## Results", ""]
-    headers = ["label", "status", "stream", "input", "cached", "prompt_ms", "ttft_ms", "total_ms", "text"]
+    headers = [
+        "label",
+        "status",
+        "stream",
+        "input",
+        "cached",
+        "prompt_ms",
+        "ttft_ms",
+        "total_ms",
+        "text",
+    ]
     rows = []
     for r in results:
         rows.append(
@@ -1076,8 +1110,17 @@ def parse_args(argv: Iterable[str]) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
     base_url = normalize_base_url(args.base_url)
-    api_key = args.api_key or os.getenv("OPENAI_API_KEY") or os.getenv("ANTHROPIC_API_KEY") or ""
-    model = args.model or discover_model(base_url, api_key, args.connect_timeout) or "local-model"
+    api_key = (
+        args.api_key
+        or os.getenv("OPENAI_API_KEY")
+        or os.getenv("ANTHROPIC_API_KEY")
+        or ""
+    )
+    model = (
+        args.model
+        or discover_model(base_url, api_key, args.connect_timeout)
+        or "local-model"
+    )
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     log_dir = args.log_dir / timestamp
     client = RawClient(
@@ -1108,7 +1151,9 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Base URL: {base_url}")
     print(f"API: {args.api}")
     print(f"Model: {model}")
-    print(f"Large context: ~{args.context_words} words; tools: {args.tool_count}; turns: {turns}")
+    print(
+        f"Large context: ~{args.context_words} words; tools: {args.tool_count}; turns: {turns}"
+    )
     print(f"Logs: {log_dir}")
 
     results: list[RequestResult] = []

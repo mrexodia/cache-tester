@@ -324,7 +324,7 @@ async function runVisibleWarmup(phase) {
   warmupResults[index] = {...data, phase, label};
   renderAll();
   if (!data.ok) {
-    setStatus(`${label} did not succeed; continuing with visible tests. ` + (data.error || ''), 'warn');
+    setStatus(`${label} failed. ` + (data.error || ''), 'bad');
   }
   return data;
 }
@@ -545,7 +545,11 @@ async function runSmoke(reset=true) {
   setBusy(true);
   try {
     await ensureModel();
-    await runVisibleWarmup('smoke');
+    const warmup = await runVisibleWarmup('smoke');
+    if (!warmup.ok) {
+      setStatus('Smoke warmup failed; smoke tests stopped. ' + (warmup.error || ''), 'bad');
+      return;
+    }
     for (const combo of COMBOS) {
       const k = comboKey(combo);
       smokeResults.set(k, 'running'); renderAll();
@@ -557,12 +561,25 @@ async function runSmoke(reset=true) {
     setStatus(`Smoke complete: ${pass}/${COMBOS.length} combinations passed.`, pass ? 'ok' : 'bad');
   } finally { setBusy(false); }
 }
-function passingCombosOrAll() {
-  const passing = COMBOS.filter(c => {
+function smokeCompletedCount() {
+  return [...smokeResults.values()].filter(v => v && v !== 'running').length;
+}
+function passingCombos() {
+  return COMBOS.filter(c => {
     const r = smokeResults.get(comboKey(c));
     return r && r !== 'running' && r.ok;
   });
-  return passing.length ? passing : COMBOS;
+}
+function selectableFullCombos() {
+  const completed = smokeCompletedCount();
+  if (!completed) {
+    return {combos: [], error: 'Run smoke first; full cache tests only run for smoke-passing combinations.'};
+  }
+  const combos = passingCombos();
+  if (!combos.length) {
+    return {combos: [], error: `No smoke-passing combinations (${completed}/${COMBOS.length} completed); full cache tests skipped.`};
+  }
+  return {combos, error: ''};
 }
 async function runFull() {
   if (busy) return;
@@ -570,8 +587,17 @@ async function runFull() {
   setBusy(true);
   try {
     await ensureModel();
-    await runVisibleWarmup('cache');
-    const combos = passingCombosOrAll();
+    const selected = selectableFullCombos();
+    if (selected.error) {
+      setStatus(selected.error, 'bad');
+      return;
+    }
+    const warmup = await runVisibleWarmup('cache');
+    if (!warmup.ok) {
+      setStatus('Cache-test warmup failed; full cache tests stopped. ' + (warmup.error || ''), 'bad');
+      return;
+    }
+    const combos = selected.combos;
     for (const combo of combos) {
       const k = comboKey(combo);
       fullResults.set(k, 'running'); renderAll();
@@ -589,7 +615,11 @@ async function runAll() {
   try {
     saveCfg();
     await ensureModel();
-    await runVisibleWarmup('smoke');
+    const warmup = await runVisibleWarmup('smoke');
+    if (!warmup.ok) {
+      setStatus('Smoke warmup failed; smoke tests stopped. ' + (warmup.error || ''), 'bad');
+      return;
+    }
     for (const combo of COMBOS) {
       const k = comboKey(combo);
       smokeResults.set(k, 'running'); renderAll();
@@ -597,9 +627,17 @@ async function runAll() {
       const data = await postJson('/api/smoke-one', {...cfg(), ...combo});
       smokeResults.set(k, data); renderAll();
     }
-    const combos = passingCombosOrAll();
-    setStatus(`Smoke complete. Running cache-test warmup before ${combos.length} full cache test combination(s)...`, 'ok');
-    await runVisibleWarmup('cache');
+    const combos = passingCombos();
+    if (!combos.length) {
+      setStatus(`Smoke complete: 0/${COMBOS.length} combinations passed. Full cache tests skipped.`, 'bad');
+      return;
+    }
+    setStatus(`Smoke complete: ${combos.length}/${COMBOS.length} passed. Running cache-test warmup before full cache tests...`, 'ok');
+    const cacheWarmup = await runVisibleWarmup('cache');
+    if (!cacheWarmup.ok) {
+      setStatus('Cache-test warmup failed; full cache tests stopped. ' + (cacheWarmup.error || ''), 'bad');
+      return;
+    }
     for (const combo of combos) {
       const k = comboKey(combo);
       fullResults.set(k, 'running'); renderAll();
@@ -607,7 +645,7 @@ async function runAll() {
       const data = await postJson('/api/full-one', {...cfg(), ...combo});
       fullResults.set(k, data); renderAll();
     }
-    setStatus('All tests complete.', 'ok');
+    setStatus(`All tests complete. Full cache tests ran for ${combos.length} smoke-passing combination${combos.length === 1 ? '' : 's'}.`, 'ok');
   } finally { setBusy(false); }
 }
 

@@ -51,7 +51,7 @@ INDEX_HTML_PATH = WWW_DIR / "index.html"
 def list_models(base_url: str, api_key: str, timeout: float) -> list[str]:
     base = normalize_base_url(base_url)
     response = requests.get(
-        f"{base}/models",
+        f"{base}/models?reload=1",
         headers={"Authorization": f"Bearer {api_key}"},
         timeout=(timeout, timeout),
     )
@@ -88,16 +88,28 @@ def is_client_disconnect(exc: BaseException) -> bool:
     if isinstance(exc, (BrokenPipeError, ConnectionAbortedError, ConnectionResetError)):
         return True
     if isinstance(exc, OSError):
-        return exc.errno in {errno.EPIPE, errno.ECONNABORTED, errno.ECONNRESET} or getattr(exc, "winerror", None) in {10053, 10054}
+        return exc.errno in {
+            errno.EPIPE,
+            errno.ECONNABORTED,
+            errno.ECONNRESET,
+        } or getattr(exc, "winerror", None) in {10053, 10054}
     return False
 
 
 def config_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    api_key = payload.get("api_key") or os.getenv("OPENAI_API_KEY") or os.getenv("ANTHROPIC_API_KEY") or DEFAULT_API_KEY
+    api_key = (
+        payload.get("api_key")
+        or os.getenv("OPENAI_API_KEY")
+        or os.getenv("ANTHROPIC_API_KEY")
+        or DEFAULT_API_KEY
+    )
     base_url = normalize_base_url(str(payload.get("base_url") or DEFAULT_ENDPOINT))
     model = str(payload.get("model") or "").strip()
     if not model:
-        model = discover_model(base_url, api_key, DEFAULT_CONNECT_TIMEOUT_SECONDS) or "local-model"
+        model = (
+            discover_model(base_url, api_key, DEFAULT_CONNECT_TIMEOUT_SECONDS)
+            or "local-model"
+        )
     read_timeout = payload.get("read_timeout")
     if read_timeout in ("", None):
         read_timeout = None
@@ -110,11 +122,15 @@ def config_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "model": model,
         "api": str(payload.get("api") or "chat"),
         "stream": bool_from_json(payload.get("stream")),
-        "context_tokens": max(100, int(payload.get("context_tokens") or DEFAULT_CONTEXT_WORDS)),
+        "context_tokens": max(
+            100, int(payload.get("context_tokens") or DEFAULT_CONTEXT_WORDS)
+        ),
         "tool_count": max(0, int(payload.get("tool_count") or DEFAULT_TOOL_COUNT)),
         "turns": max(2, int(payload.get("turns") or 2)),
         "temperature": float(payload.get("temperature") or 0.0),
-        "connect_timeout": float(payload.get("connect_timeout") or DEFAULT_CONNECT_TIMEOUT_SECONDS),
+        "connect_timeout": float(
+            payload.get("connect_timeout") or DEFAULT_CONNECT_TIMEOUT_SECONDS
+        ),
         "read_timeout": read_timeout,
     }
 
@@ -136,7 +152,9 @@ def write_config(log_dir: Path, cfg: dict[str, Any], phase: str) -> None:
     public_cfg = {k: v for k, v in cfg.items() if k != "api_key"}
     public_cfg["phase"] = phase
     log_dir.mkdir(parents=True, exist_ok=True)
-    (log_dir / "config.json").write_text(json.dumps(public_cfg, indent=2), encoding="utf-8")
+    (log_dir / "config.json").write_text(
+        json.dumps(public_cfg, indent=2), encoding="utf-8"
+    )
 
 
 def read_log_files(root: Path, payload: dict[str, Any]) -> dict[str, Any]:
@@ -157,7 +175,9 @@ def read_log_files(root: Path, payload: dict[str, Any]) -> dict[str, Any]:
         try:
             resolved.relative_to(root_path)
         except ValueError as exc:
-            raise PermissionError(f"refusing to read outside log directory: {label}") from exc
+            raise PermissionError(
+                f"refusing to read outside log directory: {label}"
+            ) from exc
         if not resolved.exists() or not resolved.is_file():
             files[label] = "<missing>"
             continue
@@ -184,9 +204,25 @@ def make_smoke_tools(api: str, nonce: str) -> list[dict[str, Any]]:
         },
     }
     if api == "chat":
-        return [{"type": "function", "function": {"name": name, "description": description, "parameters": schema}}]
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "description": description,
+                    "parameters": schema,
+                },
+            }
+        ]
     if api == "responses":
-        return [{"type": "function", "name": name, "description": description, "parameters": schema}]
+        return [
+            {
+                "type": "function",
+                "name": name,
+                "description": description,
+                "parameters": schema,
+            }
+        ]
     if api == "anthropic":
         return [{"name": name, "description": description, "input_schema": schema}]
     return []
@@ -233,8 +269,16 @@ def run_hidden_warmup(root: Path, payload: dict[str, Any]) -> dict[str, Any]:
             body=body,
             stream=False,
         )
-        summary = {"ok": result.ok, "phase": phase, "api": api, "log_dir": str(log_dir), "result": result_to_dict(result)}
-        (log_dir / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+        summary = {
+            "ok": result.ok,
+            "phase": phase,
+            "api": api,
+            "log_dir": str(log_dir),
+            "result": result_to_dict(result),
+        }
+        (log_dir / "summary.json").write_text(
+            json.dumps(summary, indent=2), encoding="utf-8"
+        )
         if result.ok:
             return summary
         errors.append(f"{api}: {result.error or result.status_code}")
@@ -279,8 +323,14 @@ def run_smoke_one(root: Path, payload: dict[str, Any]) -> dict[str, Any]:
         body=body,
         stream=cfg["stream"],
     )
-    summary = {"ok": result.ok, "log_dir": str(log_dir), "result": result_to_dict(result)}
-    (log_dir / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    summary = {
+        "ok": result.ok,
+        "log_dir": str(log_dir),
+        "result": result_to_dict(result),
+    }
+    (log_dir / "summary.json").write_text(
+        json.dumps(summary, indent=2), encoding="utf-8"
+    )
     return summary
 
 
@@ -318,7 +368,9 @@ def run_full_one(root: Path, payload: dict[str, Any]) -> dict[str, Any]:
         "assessment": assessment,
         "results": [result_to_dict(r) for r in results],
     }
-    (log_dir / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    (log_dir / "summary.json").write_text(
+        json.dumps(summary, indent=2), encoding="utf-8"
+    )
     return summary
 
 
@@ -337,9 +389,18 @@ class CacheTesterHandler(BaseHTTPRequestHandler):
             api_key = params.get("api_key", [DEFAULT_API_KEY])[0] or DEFAULT_API_KEY
             try:
                 models = list_models(base_url, api_key, DEFAULT_CONNECT_TIMEOUT_SECONDS)
-                self.send_json({"ok": True, "base_url": normalize_base_url(base_url), "models": models})
+                self.send_json(
+                    {
+                        "ok": True,
+                        "base_url": normalize_base_url(base_url),
+                        "models": models,
+                    }
+                )
             except Exception as exc:
-                self.send_json({"ok": False, "error": f"{type(exc).__name__}: {exc}"}, HTTPStatus.OK)
+                self.send_json(
+                    {"ok": False, "error": f"{type(exc).__name__}: {exc}"},
+                    HTTPStatus.OK,
+                )
             return
         if parsed.path.startswith("/api/"):
             self.send_json({"ok": False, "error": "not found"}, HTTPStatus.NOT_FOUND)
@@ -394,19 +455,28 @@ class CacheTesterHandler(BaseHTTPRequestHandler):
         try:
             path.relative_to(root)
         except ValueError:
-            self.send_bytes(b"Forbidden", "text/plain; charset=utf-8", HTTPStatus.FORBIDDEN)
+            self.send_bytes(
+                b"Forbidden", "text/plain; charset=utf-8", HTTPStatus.FORBIDDEN
+            )
             return
         if not path.exists() or not path.is_file():
-            self.send_bytes(b"Not found", "text/plain; charset=utf-8", HTTPStatus.NOT_FOUND)
+            self.send_bytes(
+                b"Not found", "text/plain; charset=utf-8", HTTPStatus.NOT_FOUND
+            )
             return
         content_type = mimetypes.guess_type(str(path))[0] or "application/octet-stream"
         if path == INDEX_HTML_PATH.resolve():
             content_type = "text/html; charset=utf-8"
-        elif content_type.startswith("text/") or content_type in {"application/javascript", "application/json"}:
+        elif content_type.startswith("text/") or content_type in {
+            "application/javascript",
+            "application/json",
+        }:
             content_type += "; charset=utf-8"
         self.send_bytes(path.read_bytes(), content_type)
 
-    def send_bytes(self, data: bytes, content_type: str, status: HTTPStatus = HTTPStatus.OK) -> None:
+    def send_bytes(
+        self, data: bytes, content_type: str, status: HTTPStatus = HTTPStatus.OK
+    ) -> None:
         try:
             self.send_response(int(status))
             self.send_header("Content-Type", content_type)
@@ -429,9 +499,23 @@ class CacheTesterHandler(BaseHTTPRequestHandler):
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Start the cache tester web UI.")
-    parser.add_argument("--host", default=DEFAULT_WEB_HOST, help=f"Bind host (default: {DEFAULT_WEB_HOST}).")
-    parser.add_argument("--port", type=int, default=DEFAULT_WEB_PORT, help=f"Bind port (default: {DEFAULT_WEB_PORT}).")
-    parser.add_argument("--log-dir", type=Path, default=Path(".cache-tester-logs"), help="Log directory root (default: .cache-tester-logs).")
+    parser.add_argument(
+        "--host",
+        default=DEFAULT_WEB_HOST,
+        help=f"Bind host (default: {DEFAULT_WEB_HOST}).",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=DEFAULT_WEB_PORT,
+        help=f"Bind port (default: {DEFAULT_WEB_PORT}).",
+    )
+    parser.add_argument(
+        "--log-dir",
+        type=Path,
+        default=Path(".cache-tester-logs"),
+        help="Log directory root (default: .cache-tester-logs).",
+    )
     return parser.parse_args(argv)
 
 
