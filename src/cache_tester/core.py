@@ -357,6 +357,7 @@ def endpoint_for(api: str, base_url: str) -> str:
 def headers_for(api: str, api_key: str) -> dict[str, str]:
     if api == "anthropic":
         return {
+            "Authorization": f"Bearer {api_key}",
             "x-api-key": api_key,
             "anthropic-version": "2023-06-01",
         }
@@ -645,6 +646,7 @@ def coalesce_stream_metrics(api: str, events: list[Any]) -> Any:
     # message_start.message.usage and output usage in message_delta.usage.
     usage_obj: dict[str, Any] = {}
     timings_obj: dict[str, Any] = {}
+    ollama_obj: dict[str, Any] = {}
     final_response: dict[str, Any] | None = None
     for event in events:
         data = event.get("data") if isinstance(event, dict) else None
@@ -667,6 +669,16 @@ def coalesce_stream_metrics(api: str, events: list[Any]) -> Any:
             usage_obj.update(data["usage"])
         if isinstance(data.get("timings"), dict):
             timings_obj.update(data["timings"])
+        for key in (
+            "total_duration",
+            "load_duration",
+            "prompt_eval_count",
+            "prompt_eval_duration",
+            "eval_count",
+            "eval_duration",
+        ):
+            if key in data:
+                ollama_obj[key] = data[key]
     if final_response is not None and isinstance(final_response.get("usage"), dict):
         return final_response
     merged: dict[str, Any] = {}
@@ -676,6 +688,8 @@ def coalesce_stream_metrics(api: str, events: list[Any]) -> Any:
         merged["usage"] = usage_obj
     if timings_obj:
         merged["timings"] = timings_obj
+    if ollama_obj:
+        merged.update(ollama_obj)
     return merged
 
 
@@ -690,12 +704,16 @@ def apply_usage_and_timing(result: RequestResult, obj: Any) -> None:
         "input_tokens",
         "input_token_count",
     )
+    if raw_input_tokens is None:
+        raw_input_tokens = first_int(obj, "prompt_eval_count")
     output_tokens = first_int(
         usage,
         "completion_tokens",
         "output_tokens",
         "output_token_count",
     )
+    if output_tokens is None:
+        output_tokens = first_int(obj, "eval_count")
 
     prompt_details = usage.get("prompt_tokens_details")
     input_details = usage.get("input_tokens_details")
