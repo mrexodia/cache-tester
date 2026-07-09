@@ -179,16 +179,16 @@
     <div class="grid">
       <div class="field col-4">
         <label for="endpoint">Endpoint</label>
-        <input id="endpoint" value="http://127.0.0.1:1234" autocomplete="off" />
+        <input id="endpoint" value="http://127.0.0.1:1234" autocomplete="off" data-bwignore="true" data-lpignore="true" data-1p-ignore="true" />
       </div>
       <div class="field col-3">
         <label for="apiKey">API key</label>
-        <input id="apiKey" type="password" value="" autocomplete="current-password" />
+        <input id="apiKey" type="password" value="" autocomplete="off" autocapitalize="off" spellcheck="false" data-bwignore="true" data-lpignore="true" data-1p-ignore="true" />
       </div>
       <div class="field col-5">
         <label for="model">Model</label>
         <div class="combo" id="modelCombo">
-          <input id="model" placeholder="auto-discover first model" autocomplete="new-password" spellcheck="false" role="combobox" aria-expanded="false" aria-controls="modelMenu" />
+          <input id="model" placeholder="auto-discover first model" autocomplete="off" spellcheck="false" role="combobox" aria-expanded="false" aria-controls="modelMenu" data-bwignore="true" data-lpignore="true" data-1p-ignore="true" />
           <button type="button" class="combo-toggle" id="modelMenuBtn" aria-label="Show discovered models">▾</button>
           <div class="combo-menu" id="modelMenu" role="listbox"></div>
         </div>
@@ -212,10 +212,10 @@
       <div class="field col-4">
         <label>Actions</label>
         <div class="buttons">
-          <button id="discoverBtn">Discover models</button>
-          <button id="smokeBtn">Run smoke</button>
-          <button id="fullBtn">Run full cache test</button>
-          <button id="allBtn" class="primary">Run all</button>
+          <button id="discoverBtn" type="button">Discover models</button>
+          <button id="smokeBtn" type="button">Run smoke</button>
+          <button id="fullBtn" type="button">Run full cache test</button>
+          <button id="allBtn" type="button" class="primary">Run all</button>
         </div>
       </div>
       <div class="col-12 status-line" id="statusLine"></div>

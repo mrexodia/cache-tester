@@ -66,7 +66,7 @@ def list_models(base_url: str, api_key: str, timeout: float) -> list[str]:
         for item in data["models"]:
             if isinstance(item, dict) and isinstance(item.get("name"), str):
                 models.append(item["name"])
-    return models
+    return sorted(dict.fromkeys(models), key=str.casefold)
 
 
 def safe_run_id(value: str | None) -> str:
